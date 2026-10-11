@@ -240,6 +240,9 @@ pub async fn fetch_official_update_info(
                     if resolved.maintainer.is_none() {
                         resolved.maintainer = gms.maintainer.clone();
                     }
+                    if resolved.security_patch.is_none() {
+                        resolved.security_patch = gms.security_patch.clone();
+                    }
                 }
 
                 if let Some(ref vanilla) = vanilla_res {
@@ -261,6 +264,9 @@ pub async fn fetch_official_update_info(
                     }
                     if resolved.maintainer.is_none() {
                         resolved.maintainer = vanilla.maintainer.clone();
+                    }
+                    if resolved.security_patch.is_none() {
+                        resolved.security_patch = vanilla.security_patch.clone();
                     }
                 }
 
@@ -292,6 +298,7 @@ pub async fn fetch_official_update_info(
                     devicename: info.devicename,
                     maintainer: info.maintainer,
                     download_url: info.url,
+                    security_patch: info.security_patch,
                 };
                 return Some(resolved);
             }
@@ -513,6 +520,31 @@ pub async fn load_device_from_github(
             }
         });
 
+    // Resolve security patch: explicit in update/site > derived from build datetime (%B %Y) > "N/A"
+    let security_patch = updates
+        .as_ref()
+        .and_then(|u| u.security_patch.clone())
+        .or_else(|| site_detail.as_ref().and_then(|d| d.security_patch.clone()))
+        .or_else(|| {
+            updates
+                .as_ref()
+                .and_then(|u| u.latest_datetime)
+                .and_then(|dt| {
+                    chrono::DateTime::from_timestamp(dt, 0)
+                        .map(|d| d.format("%B %Y").to_string())
+                })
+        })
+        .or_else(|| {
+            cached_summary
+                .as_ref()
+                .and_then(|s| s.datetime)
+                .and_then(|dt| {
+                    chrono::DateTime::from_timestamp(dt, 0)
+                        .map(|d| d.format("%B %Y").to_string())
+                })
+        })
+        .unwrap_or_else(|| "N/A".to_string());
+
     let device = UnifiedDevice {
         device_name,
         codename: correct_filename,
@@ -526,7 +558,7 @@ pub async fn load_device_from_github(
         download_url,
         gms_download_url,
         vanilla_download_url,
-        security_patch: "N/A".to_string(),
+        security_patch,
         md5,
     };
 
@@ -643,6 +675,7 @@ mod tests {
         let dev = dev.unwrap();
         assert_eq!(dev.codename, "peridot");
         assert_eq!(dev.android_version, "17");
+        assert_eq!(dev.security_patch, "October 2026");
         assert!(dev.gms_download_url.is_some());
         assert!(dev.vanilla_download_url.is_some());
 
@@ -651,5 +684,6 @@ mod tests {
         let dev_cancunf = dev_cancunf.unwrap();
         assert_eq!(dev_cancunf.codename, "cancunf");
         assert_eq!(dev_cancunf.android_version, "16");
+        assert_eq!(dev_cancunf.security_patch, "June 2026");
     }
 }

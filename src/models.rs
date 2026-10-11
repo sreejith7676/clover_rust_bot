@@ -36,6 +36,8 @@ pub struct SiteDeviceDetail {
     pub maintainer: Option<NewMaintainer>,
     #[serde(default, rename = "installationGuide")]
     pub installation_guide: Option<InstallationGuide>,
+    #[serde(default, rename = "securityPatch", alias = "security_patch")]
+    pub security_patch: Option<String>,
 }
 
 // Backward-compatible alias
@@ -88,6 +90,8 @@ pub struct OldDeviceInfo {
     #[serde(default, rename = "romtype")]
     #[allow(dead_code)]
     pub rom_type: Option<String>,
+    #[serde(default, rename = "securityPatch", alias = "security_patch")]
+    pub security_patch: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -102,6 +106,7 @@ pub struct ResolvedUpdates {
     pub devicename: Option<String>,
     pub maintainer: Option<String>,
     pub download_url: Option<String>,
+    pub security_patch: Option<String>,
 }
 
 // ==========================================

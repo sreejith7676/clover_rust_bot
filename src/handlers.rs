@@ -261,13 +261,13 @@ async fn clover_info(
             if device.android_version == "17" {
                 if let Some(ref gms) = device.gms_download_url {
                     if let Ok(url) = Url::parse(gms) {
-                        download_row.push(InlineKeyboardButton::url("📦 Download GMS", url));
+                        download_row.push(InlineKeyboardButton::url("🧩 GMS", url));
                     }
                 }
 
                 if let Some(ref vanilla) = device.vanilla_download_url {
                     if let Ok(url) = Url::parse(vanilla) {
-                        download_row.push(InlineKeyboardButton::url("🍦 Download Vanilla", url));
+                        download_row.push(InlineKeyboardButton::url("🍦Vanilla", url));
                     }
                 }
 

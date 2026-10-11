@@ -215,12 +215,22 @@ async fn clover_info(
                 _ => teloxide::utils::html::escape(&device.maintainer),
             };
 
+            let version_line = if device.android_version == "N/A" || device.android_version.is_empty() {
+                format!("<b>Version:</b> {}\n", teloxide::utils::html::escape(&device.version))
+            } else {
+                format!(
+                    "<b>Version:</b> {} (Android {})\n",
+                    teloxide::utils::html::escape(&device.version),
+                    teloxide::utils::html::escape(&device.android_version)
+                )
+            };
+
             let caption_text = format!(
                 "📱 <b>Device</b>\n\
                 <b>{}</b> — <code>{}</code>\n\n\
                 🛠 <b>Build Info</b>\n\
                 <b>Status:</b> {}\n\
-                <b>Version:</b> {} (Android {})\n\
+                {}\
                 <b>Date:</b> {}\n\
                 <b>File Size:</b> {}\n\n\
                 🛡 <b>Security</b>\n\
@@ -231,8 +241,7 @@ async fn clover_info(
                 teloxide::utils::html::escape(&device.device_name),
                 teloxide::utils::html::escape(&device.codename),
                 status_with_emoji,
-                teloxide::utils::html::escape(&device.version),
-                teloxide::utils::html::escape(&device.android_version),
+                version_line,
                 teloxide::utils::html::escape(&device.date),
                 teloxide::utils::html::escape(&device.size),
                 teloxide::utils::html::escape(&device.security_patch),
@@ -243,27 +252,29 @@ async fn clover_info(
             );
 
             // Separate GMS & Vanilla Download Buttons
+            // ONLY rendered for Android 17 builds with valid URLs.
+            // Builds below A17 are removed because their download links are dead.
+            // Devices without update entries (e.g. unreleased/vayu) have no download buttons.
             let mut keyboard_rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
             let mut download_row: Vec<InlineKeyboardButton> = Vec::new();
 
-            if let Some(ref gms) = device.gms_download_url {
-                if let Ok(url) = Url::parse(gms) {
-                    download_row.push(InlineKeyboardButton::url("📦 Download GMS", url));
+            if device.android_version == "17" {
+                if let Some(ref gms) = device.gms_download_url {
+                    if let Ok(url) = Url::parse(gms) {
+                        download_row.push(InlineKeyboardButton::url("📦 Download GMS", url));
+                    }
+                }
+
+                if let Some(ref vanilla) = device.vanilla_download_url {
+                    if let Ok(url) = Url::parse(vanilla) {
+                        download_row.push(InlineKeyboardButton::url("🍦 Download Vanilla", url));
+                    }
+                }
+
+                if !download_row.is_empty() {
+                    keyboard_rows.push(download_row);
                 }
             }
-
-            if let Some(ref vanilla) = device.vanilla_download_url {
-                if let Ok(url) = Url::parse(vanilla) {
-                    download_row.push(InlineKeyboardButton::url("🍦 Download Vanilla", url));
-                }
-            }
-
-            if download_row.is_empty() {
-                let download_url = Url::parse(&device.download_url)
-                    .unwrap_or_else(|_| Url::parse("https://thecloverproject.com").unwrap());
-                download_row.push(InlineKeyboardButton::url("📥 Download Now", download_url));
-            }
-            keyboard_rows.push(download_row);
 
             let website_url_str = format!("https://thecloverproject.com/download/{}", device.codename);
             let website_url = Url::parse(&website_url_str)

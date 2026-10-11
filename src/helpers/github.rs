@@ -460,20 +460,19 @@ pub async fn load_device_from_github(
     let raw_version = updates
         .as_ref()
         .and_then(|u| u.version.clone())
-        .or_else(|| cached_summary.as_ref().and_then(|s| s.version.clone()))
-        .unwrap_or_else(|| "4.0".to_string());
+        .or_else(|| cached_summary.as_ref().and_then(|s| s.version.clone()));
 
-    let version_display = if raw_version.starts_with('v') {
-        raw_version
-    } else {
-        format!("v{}", raw_version)
+    let version_display = match raw_version {
+        Some(ref v) if v.starts_with('v') => v.clone(),
+        Some(ref v) => format!("v{}", v),
+        None => "Upcoming".to_string(),
     };
 
     // Resolve Android version
     let android_version = updates
         .as_ref()
         .map(|u| u.android_version.clone())
-        .unwrap_or_else(|| config::DEFAULT_BRANCH.to_string());
+        .unwrap_or_else(|| "N/A".to_string());
 
     // Resolve date
     let date_str = updates
@@ -494,13 +493,20 @@ pub async fn load_device_from_github(
         .and_then(|u| u.size_formatted.clone())
         .unwrap_or_else(|| "N/A".to_string());
 
-    // Resolve download URLs
-    let gms_download_url = updates.as_ref().and_then(|u| u.gms_url.clone());
-    let vanilla_download_url = updates.as_ref().and_then(|u| u.vanilla_url.clone());
-    let download_url = updates
-        .as_ref()
-        .and_then(|u| u.download_url.clone())
-        .unwrap_or_else(|| format!("https://thecloverproject.com/download/{}", correct_filename));
+    // Download URLs: ONLY populated for active Android 17 builds.
+    // Builds below A17 have dead links and devices without update entry have no build.
+    let is_a17 = android_version == "17";
+    let (gms_download_url, vanilla_download_url, download_url) = if is_a17 {
+        let gms = updates.as_ref().and_then(|u| u.gms_url.clone());
+        let vanilla = updates.as_ref().and_then(|u| u.vanilla_url.clone());
+        let dl = updates
+            .as_ref()
+            .and_then(|u| u.download_url.clone())
+            .unwrap_or_else(|| format!("https://thecloverproject.com/download/{}", correct_filename));
+        (gms, vanilla, dl)
+    } else {
+        (None, None, String::new())
+    };
 
     let md5 = updates
         .as_ref()
@@ -685,5 +691,16 @@ mod tests {
         assert_eq!(dev_cancunf.codename, "cancunf");
         assert_eq!(dev_cancunf.android_version, "16");
         assert_eq!(dev_cancunf.security_patch, "June 2026");
+        assert!(dev_cancunf.gms_download_url.is_none(), "Download button should be removed for A16");
+        assert!(dev_cancunf.vanilla_download_url.is_none(), "Download button should be removed for A16");
+
+        let dev_vayu = load_device_from_github("vayu", &state).await.expect("load should succeed");
+        assert!(dev_vayu.is_some(), "Expected UnifiedDevice for vayu");
+        let dev_vayu = dev_vayu.unwrap();
+        assert_eq!(dev_vayu.codename, "vayu");
+        assert_eq!(dev_vayu.android_version, "N/A");
+        assert_eq!(dev_vayu.version, "Upcoming");
+        assert!(dev_vayu.gms_download_url.is_none(), "Download button should be removed when no entry");
+        assert!(dev_vayu.vanilla_download_url.is_none(), "Download button should be removed when no entry");
     }
 }

@@ -14,6 +14,7 @@ pub struct UnifiedDevice {
     pub status: String,
     pub date: String,
     pub size: String,
+    #[allow(dead_code)]
     pub download_url: String,
     pub gms_download_url: Option<String>,
     pub vanilla_download_url: Option<String>,

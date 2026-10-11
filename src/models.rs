@@ -8,60 +8,100 @@ pub struct UnifiedDevice {
     pub device_name: String,
     pub codename: String,
     pub maintainer: String,
+    pub maintainer_github: Option<String>,
     pub version: String,
     pub android_version: String,
     pub status: String,
     pub date: String,
     pub size: String,
     pub download_url: String,
+    pub gms_download_url: Option<String>,
+    pub vanilla_download_url: Option<String>,
     pub security_patch: String,
     pub md5: String,
 }
 
 // ==========================================
-// 2. MAIN JSON Structure (TheCloverProject.com)
+// 2. Site Device JSON Structure (official_updates/site/devices/{codename}.json)
 // ==========================================
-#[derive(Deserialize, Debug)]
-pub struct NewDeviceRoot {
+#[derive(Deserialize, Debug, Clone)]
+pub struct SiteDeviceDetail {
     pub name: String,
-    pub codename: String,
-    pub maintainer: NewMaintainer,
-    pub builds: Vec<NewBuild>,
+    #[serde(default)]
+    pub brand: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub tagline: Option<String>,
+    #[serde(default)]
+    pub maintainer: Option<NewMaintainer>,
+    #[serde(default, rename = "installationGuide")]
+    pub installation_guide: Option<InstallationGuide>,
 }
 
-#[derive(Deserialize, Debug)]
+// Backward-compatible alias
+#[allow(dead_code)]
+pub type NewDeviceRoot = SiteDeviceDetail;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NewMaintainer {
     pub name: String,
+    #[serde(default, rename = "githubUrl")]
+    pub github_url: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct NewBuild {
-    pub version: String,
-    #[serde(rename = "androidVersion")]
-    pub android_version: String,
-    #[serde(rename = "fileSize")]
-    pub file_size: String,
-    #[serde(rename = "downloadUrl")]
-    pub download_url: String,
-    pub date: Option<String>, 
-    
-    // ADDED: Read these from the JSON
-    #[serde(rename = "securityPatch")]
-    pub security_patch: Option<String>,
-    pub md5: Option<String>,
+#[derive(Deserialize, Debug, Clone)]
+pub struct InstallationGuide {
+    #[serde(default)]
+    pub steps: Vec<InstallationStep>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub warning: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct InstallationStep {
+    pub title: String,
+    pub description: String,
 }
 
 // ==========================================
-// 3. DATE JSON Structure (official_updates)
+// 3. OTA / Update JSON Structure (official_updates/devices/...)
 // ==========================================
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct OldDeviceResponse {
     pub response: Vec<OldDeviceInfo>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct OldDeviceInfo {
-    pub datetime: i64, 
+    pub datetime: i64,
+    #[allow(dead_code)]
+    pub filename: Option<String>,
+    #[allow(dead_code)]
+    pub id: Option<String>,
+    pub md5: Option<String>,
+    pub size: Option<serde_json::Value>,
+    pub url: Option<String>,
+    pub version: Option<String>,
+    pub devicename: Option<String>,
+    pub maintainer: Option<String>,
+    #[serde(default, rename = "romtype")]
+    #[allow(dead_code)]
+    pub rom_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedUpdates {
+    pub latest_datetime: Option<i64>,
+    pub gms_url: Option<String>,
+    pub vanilla_url: Option<String>,
+    pub version: Option<String>,
+    pub md5: Option<String>,
+    pub size_formatted: Option<String>,
+    pub android_version: String,
+    pub devicename: Option<String>,
+    pub maintainer: Option<String>,
+    pub download_url: Option<String>,
 }
 
 // ==========================================
@@ -73,13 +113,24 @@ pub struct GithubFile {
 }
 
 // ==========================================
-// 5. List Cache Structure (NEW)
+// 5. List Cache Structure (official_updates/site/devices.json)
 // ==========================================
-// This struct captures the summary info needed for the categorized /list command
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSummary {
     pub codename: String,
     pub name: String,
     pub brand: String,
+    #[serde(default)]
+    pub maintainer: Option<NewMaintainer>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub datetime: Option<i64>,
+    #[serde(default)]
+    pub variants: Option<Vec<String>>,
+    #[serde(default)]
+    pub changelog: Option<String>,
+    #[serde(default)]
+    pub released: Option<bool>,
 }

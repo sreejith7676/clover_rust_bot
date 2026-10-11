@@ -10,16 +10,26 @@ pub const GROUP_LINK: &str = "https://t.me/TheCloverProject_Chat";
 
 // --- GITHUB CONFIGURATION ---
 pub const GITHUB_ORG: &str = "The-Clover-Project";
-pub const REPO_DATE: &str = "official_updates";
-pub const BRANCH_DATE: &str = "16";
-pub const DIR_DATE: &str = "devices";
 
-pub const REPO_MAIN: &str = "TheCloverProject.com";
-pub const BRANCH_MAIN: &str = "main";
-pub const DIR_MAIN: &str = "data/devices"; 
+// Unified repository (TheCloverProject.com is archived and merged into official_updates)
+pub const REPO_UPDATES: &str = "official_updates";
 
+// Supported branch hierarchy: A17 (default), A16, A15
+pub const DEFAULT_BRANCH: &str = "17";
+pub const BRANCH_A17: &str = "17";
+pub const BRANCH_A16: &str = "16";
+pub const BRANCH_A15: &str = "15";
+pub const ALL_BRANCHES: [&str; 3] = [BRANCH_A17, BRANCH_A16, BRANCH_A15];
+
+// Directories & paths within official_updates
+pub const SITE_DEVICES_JSON: &str = "site/devices.json";
+pub const DIR_SITE_DEVICES: &str = "site/devices";
+pub const DIR_CHANGELOGS: &str = "changelogs";
+#[allow(dead_code)]
+pub const DIR_DEVICES: &str = "devices"; 
+
+// Local files
 pub const LOG_FILE: &str = "clover_bot.log";
-// New constant for saving the status list
 pub const STATUS_FILE: &str = "device_status.json"; 
 
 // Helper functions

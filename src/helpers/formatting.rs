@@ -24,3 +24,32 @@ pub fn format_uptime(seconds: u64) -> String {
         format!("{} seconds", s)
     }
 }
+
+pub fn format_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    let b = bytes as f64;
+    if b >= GIB {
+        format!("{:.2} GB", b / GIB)
+    } else if b >= MIB {
+        format!("{:.2} MB", b / MIB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+pub fn format_size_value(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::Number(n) => {
+            if let Some(u) = n.as_u64() {
+                format_bytes(u)
+            } else if let Some(f) = n.as_f64() {
+                format_bytes(f as u64)
+            } else {
+                n.to_string()
+            }
+        }
+        serde_json::Value::String(s) => s.clone(),
+        _ => "N/A".to_string(),
+    }
+}

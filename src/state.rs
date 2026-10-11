@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 use teloxide::types::UserId;
 use tokio::sync::RwLock;
-use crate::models::DeviceSummary; // Import the new struct
+use crate::helpers::logs::{ListenerErrorHandler, LogBuffer};
+use crate::models::DeviceSummary;
 
 pub struct AppState {
     pub bot_start_time: Instant,
@@ -10,8 +12,10 @@ pub struct AppState {
     pub actual_filenames: RwLock<HashMap<String, String>>,
     pub http_client: reqwest::Client,
     pub device_statuses: RwLock<HashMap<String, String>>,
-    // NEW: Cache for the categorized list
     pub devices_cache: RwLock<Vec<DeviceSummary>>,
+    pub banner_file_id: RwLock<Option<String>>,
+    pub log_buffer: LogBuffer,
+    pub listener_error_handler: Arc<ListenerErrorHandler>,
 }
 
 pub struct BotStats {
@@ -21,7 +25,11 @@ pub struct BotStats {
 }
 
 impl AppState {
-    pub fn new(initial_statuses: HashMap<String, String>) -> Self {
+    pub fn new(
+        initial_statuses: HashMap<String, String>,
+        log_buffer: LogBuffer,
+        listener_error_handler: Arc<ListenerErrorHandler>,
+    ) -> Self {
         Self {
             bot_start_time: Instant::now(),
             stats: RwLock::new(BotStats {
@@ -30,10 +38,15 @@ impl AppState {
                 devices_queried: 0,
             }),
             actual_filenames: RwLock::new(HashMap::new()),
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             device_statuses: RwLock::new(initial_statuses),
-            // Initialize empty cache
             devices_cache: RwLock::new(Vec::new()),
+            banner_file_id: RwLock::new(None),
+            log_buffer,
+            listener_error_handler,
         }
     }
 }

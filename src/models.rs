@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 // ==========================================
 // 1. The Unified Structure (Used by Handlers)
@@ -14,8 +14,6 @@ pub struct UnifiedDevice {
     pub status: String,
     pub date: String,
     pub size: String,
-    #[allow(dead_code)]
-    pub download_url: String,
     pub gms_download_url: Option<String>,
     pub vanilla_download_url: Option<String>,
     pub security_patch: String,
@@ -31,9 +29,6 @@ pub struct SiteDeviceDetail {
     #[serde(default)]
     pub brand: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
-    pub tagline: Option<String>,
-    #[serde(default)]
     pub maintainer: Option<NewMaintainer>,
     #[serde(default, rename = "installationGuide")]
     pub installation_guide: Option<InstallationGuide>,
@@ -41,11 +36,7 @@ pub struct SiteDeviceDetail {
     pub security_patch: Option<String>,
 }
 
-// Backward-compatible alias
-#[allow(dead_code)]
-pub type NewDeviceRoot = SiteDeviceDetail;
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct NewMaintainer {
     pub name: String,
     #[serde(default, rename = "githubUrl")]
@@ -56,9 +47,6 @@ pub struct NewMaintainer {
 pub struct InstallationGuide {
     #[serde(default)]
     pub steps: Vec<InstallationStep>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub warning: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -78,19 +66,12 @@ pub struct OldDeviceResponse {
 #[derive(Deserialize, Debug, Clone)]
 pub struct OldDeviceInfo {
     pub datetime: i64,
-    #[allow(dead_code)]
-    pub filename: Option<String>,
-    #[allow(dead_code)]
-    pub id: Option<String>,
     pub md5: Option<String>,
     pub size: Option<serde_json::Value>,
     pub url: Option<String>,
     pub version: Option<String>,
     pub devicename: Option<String>,
     pub maintainer: Option<String>,
-    #[serde(default, rename = "romtype")]
-    #[allow(dead_code)]
-    pub rom_type: Option<String>,
     #[serde(default, rename = "securityPatch", alias = "security_patch")]
     pub security_patch: Option<String>,
 }
@@ -106,7 +87,6 @@ pub struct ResolvedUpdates {
     pub android_version: String,
     pub devicename: Option<String>,
     pub maintainer: Option<String>,
-    pub download_url: Option<String>,
     pub security_patch: Option<String>,
 }
 
@@ -121,7 +101,7 @@ pub struct GithubFile {
 // ==========================================
 // 5. List Cache Structure (official_updates/site/devices.json)
 // ==========================================
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSummary {
     pub codename: String,
@@ -133,8 +113,6 @@ pub struct DeviceSummary {
     pub version: Option<String>,
     #[serde(default)]
     pub datetime: Option<i64>,
-    #[serde(default)]
-    pub variants: Option<Vec<String>>,
     #[serde(default)]
     pub changelog: Option<String>,
     #[serde(default)]

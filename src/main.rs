@@ -1,6 +1,11 @@
+use std::io::IsTerminal;
+use std::process::ExitCode;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
-use teloxide::{prelude::*, utils::command::BotCommands};
+use anyhow::Context;
+use teloxide::{prelude::*, types::BotCommand, utils::command::BotCommands};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod config;
@@ -10,6 +15,10 @@ mod models;
 mod state;
 
 use state::AppState;
+
+/// Default log filter; override with the `RUST_LOG` environment variable.
+/// Note: teloxide's error handler is left enabled so failing command handlers are visible.
+const DEFAULT_LOG_FILTER: &str = "clover_bot_rust=debug,teloxide=info,teloxide::dispatching::dispatcher=error,reqwest=off,hyper=off,hyper_util=off,h2=off,rustls=off,tungstenite=off";
 
 #[derive(BotCommands, Clone, Debug)]
 #[command(
@@ -53,40 +62,82 @@ pub enum Command {
     Clearlogs,
 }
 
-#[tokio::main]
-async fn main() {
-    // 1. Initialize thread-safe in-memory circular log buffer
-    let log_buffer = helpers::logs::LogBuffer::new(1000);
+/// Commands shown in Telegram's command menu for everyone (server/admin commands stay hidden).
+fn public_commands() -> Vec<BotCommand> {
+    const PUBLIC: [&str; 8] = [
+        "start",
+        "clover",
+        "list",
+        "maintainership",
+        "changelog",
+        "flash",
+        "install",
+        "maintainer",
+    ];
+    Command::bot_commands()
+        .into_iter()
+        // The derive yields "/start"; Telegram's setMyCommands wants the bare name.
+        .map(|c| BotCommand::new(c.command.trim_start_matches('/').to_string(), c.description))
+        .filter(|c| PUBLIC.contains(&c.command.as_str()))
+        .collect()
+}
 
-    // 2. Set up non-blocking disk file logging using config::LOG_FILE
+#[tokio::main]
+async fn main() -> ExitCode {
+    // Load .env first so RUST_LOG and the bot settings can live there.
+    let dotenv_result = dotenvy::dotenv();
+
+    // Thread-safe in-memory circular log buffer + non-blocking disk logging.
+    let log_buffer = helpers::logs::LogBuffer::new(1000);
     let file_appender = tracing_appender::rolling::never(".", config::LOG_FILE);
     let (non_blocking_appender, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let filter = EnvFilter::new(
-        "clover_bot_rust=debug,teloxide=info,teloxide::dispatching::dispatcher=error,teloxide::error_handlers=off,reqwest=off,hyper=off,h2=off,tungstenite=off",
-    );
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
 
     tracing_subscriber::registry()
         .with(filter)
-        .with(fmt::layer().with_writer(std::io::stdout))
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_ansi(std::io::stdout().is_terminal()),
+        )
         .with(fmt::layer().with_writer(non_blocking_appender).with_ansi(false))
         .with(fmt::layer().with_writer(log_buffer.clone()).with_ansi(false))
         .init();
 
     log::info!("=== CLOVER BOT STARTING (Rust Version) ===");
+    if let Err(e) = dotenv_result {
+        log::debug!("Notice: .env file not loaded ({}). Relying on system environment variables.", e);
+    }
+
+    // `_guard` is dropped when `main` returns, which flushes the file logger.
+    match run(log_buffer).await {
+        Ok(true) => {
+            log::warn!("Exiting for restart (reboot requested).");
+            ExitCode::from(1)
+        }
+        Ok(false) => {
+            log::info!("Bot is shutting down.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            log::error!("Fatal error: {:#}", e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Runs the bot until shutdown. Returns `true` if a reboot was requested.
+async fn run(log_buffer: helpers::logs::LogBuffer) -> anyhow::Result<bool> {
+    let config = config::Config::from_env().context("invalid configuration")?;
+    let token = std::env::var("TELOXIDE_TOKEN").context("TELOXIDE_TOKEN is not set")?;
+    let bot = Bot::new(token);
 
     // Spawn periodic log file size safety guard (truncates if > 15MB)
     helpers::logs::spawn_log_size_guard();
 
-    // Gracefully load .env if available, without panicking if missing
-    if let Err(e) = dotenvy::dotenv() {
-        log::debug!("Notice: .env file not loaded ({}). Relying on system environment variables.", e);
-    }
-
-    let bot = Bot::from_env();
-
     // Verify Telegram API connection with retry loop (prevents crashing if offline during startup)
-    let mut retry_delay = std::time::Duration::from_secs(2);
+    let mut retry_delay = Duration::from_secs(2);
     loop {
         match bot.get_me().send().await {
             Ok(me) => {
@@ -94,53 +145,97 @@ async fn main() {
                 break;
             }
             Err(e) => {
-                log::warn!(
-                    "Unable to reach Telegram API ({}); retrying in {:?}...",
-                    e,
-                    retry_delay
-                );
+                log::warn!("Unable to reach Telegram API ({}); retrying in {:?}...", e, retry_delay);
                 tokio::time::sleep(retry_delay).await;
-                retry_delay = std::cmp::min(retry_delay * 2, std::time::Duration::from_secs(30));
+                retry_delay = std::cmp::min(retry_delay * 2, Duration::from_secs(30));
             }
         }
     }
 
-    // 3. Load custom statuses from JSON file
-    let saved_statuses = helpers::storage::load_statuses();
-    log::info!("Loaded {} custom device statuses from disk.", saved_statuses.len());
-
-    // 4. Initialize ListenerErrorHandler and AppState
-    let listener_error_handler = Arc::new(helpers::logs::ListenerErrorHandler::new());
-    let initial_state = AppState::new(saved_statuses, log_buffer, listener_error_handler.clone());
-
-    // 5. Preload device catalog and metadata from GitHub
-    match helpers::github::preload_devices(&initial_state).await {
-        Ok(count) => log::info!("Preloaded {} devices successfully", count),
-        Err(e) => log::error!("Failed to preload devices: {}", e),
+    if let Err(e) = bot.set_my_commands(public_commands()).await {
+        log::warn!("Could not register the bot command menu: {}", e);
     }
 
+    // Load custom statuses, then build the shared state.
+    let saved_statuses = helpers::storage::load_statuses();
+    log::info!("Loaded {} custom device statuses from disk.", saved_statuses.len());
+    let state = Arc::new(AppState::new(config, saved_statuses, log_buffer));
+
+    // Preload the device catalog; the background task retries/refreshes it afterwards.
+    match helpers::github::preload_devices(&state).await {
+        Ok(count) => log::info!("Preloaded {} devices successfully", count),
+        Err(e) => log::error!("Failed to preload devices (will retry in the background): {:#}", e),
+    }
+    helpers::github::spawn_catalog_refresh(state.clone());
+
+    let listener_error_handler = Arc::new(helpers::logs::ListenerErrorHandler::new());
+    let notify_handler = listener_error_handler.clone();
+
     let handler = dptree::entry()
-        .inspect(|state: Arc<AppState>| {
-            state.listener_error_handler.notify_success();
-        })
+        .inspect(move || notify_handler.notify_success())
         .branch(
             Update::filter_message()
-                .branch(dptree::entry().filter_command::<Command>().endpoint(handlers::command_handler))
+                .filter_command::<Command>()
+                .endpoint(handlers::command_handler),
         )
-        .branch(
-            Update::filter_callback_query()
-                .endpoint(handlers::callback_handler)
-        );
+        .branch(Update::filter_callback_query().endpoint(handlers::callback_handler));
 
-    let listener = teloxide::dispatching::update_listeners::polling_default(bot.clone()).await;
+    let listener = teloxide::update_listeners::polling_default(bot.clone()).await;
 
-    Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![Arc::new(initial_state)])
+    let mut dispatcher = Dispatcher::builder(bot, handler)
+        .dependencies(dptree::deps![state.clone()])
         .default_handler(|_| async {})
         .enable_ctrlc_handler()
-        .build()
+        .build();
+
+    // Graceful shutdown on /reboot and SIGTERM (Ctrl-C is handled by the dispatcher itself).
+    let shutdown_token = dispatcher.shutdown_token();
+    let signal_state = state.clone();
+    tokio::spawn(async move {
+        wait_for_shutdown_request(&signal_state).await;
+        match shutdown_token.shutdown() {
+            Ok(done) => done.await,
+            Err(_) => log::debug!("Dispatcher was already idle during shutdown."),
+        }
+    });
+
+    dispatcher
         .dispatch_with_listener(listener, listener_error_handler)
         .await;
 
-    log::info!("Bot is shutting down.");
+    Ok(state.reboot_requested.load(Ordering::SeqCst))
+}
+
+async fn wait_for_shutdown_request(state: &AppState) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = state.shutdown.notified() => {}
+                    _ = term.recv() => log::info!("SIGTERM received; shutting down gracefully."),
+                }
+                return;
+            }
+            Err(e) => log::warn!("Could not install SIGTERM handler: {}", e),
+        }
+    }
+    state.shutdown.notified().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_menu_hides_admin_and_server_commands() {
+        let cmds = public_commands();
+        let names: Vec<String> = cmds.iter().map(|c| c.command.clone()).collect();
+        assert_eq!(cmds.len(), 8, "{names:?}");
+        for hidden in ["sync", "reload", "reboot", "log", "clearlogs", "server", "stats", "uptime", "ping"] {
+            assert!(!names.iter().any(|n| n.trim_start_matches('/') == hidden), "{hidden} leaked");
+        }
+        assert!(names.iter().all(|n| !n.starts_with('/')), "Telegram wants names without a slash: {names:?}");
+    }
 }

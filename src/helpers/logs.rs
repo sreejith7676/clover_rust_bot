@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+
 use futures::future::BoxFuture;
 use teloxide::error_handlers::ErrorHandler;
 use teloxide::RequestError;
@@ -32,56 +33,39 @@ impl LogBuffer {
         }
     }
 
+    /// Lock the buffer, recovering from a poisoned mutex (logging must never panic).
+    fn lock(&self) -> MutexGuard<'_, LogBufferInner> {
+        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Retrieve the last `count` lines from the buffer.
     pub fn get_last_lines(&self, count: usize) -> Vec<String> {
-        let inner = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let inner = self.lock();
         inner.lines.iter().rev().take(count).rev().cloned().collect()
     }
 
     /// Retrieve all buffered lines joined with newlines.
     pub fn get_all_as_string(&self) -> String {
-        let inner = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let inner = self.lock();
         inner.lines.iter().cloned().collect::<Vec<_>>().join("\n")
-    }
-
-    /// Returns the current number of lines in the buffer.
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        let inner = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        inner.lines.len()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Clear all stored log lines and pending buffer.
     pub fn clear(&self) {
-        let mut inner = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut inner = self.lock();
         inner.lines.clear();
         inner.pending.clear();
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.lock().lines.len()
     }
 }
 
 impl Write for LogBuffer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut inner = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut inner = self.lock();
 
         let s = String::from_utf8_lossy(buf);
         inner.pending.push_str(&s);
@@ -171,7 +155,7 @@ impl ErrorHandler<RequestError> for ListenerErrorHandler {
 
             drop(last_log_guard);
 
-            // Crucial: Sleep 5 seconds to throttle polling retries and avoid busy loops when offline
+            // Throttle polling retries to avoid busy loops when offline.
             tokio::time::sleep(Duration::from_secs(5)).await;
         })
     }
@@ -179,7 +163,7 @@ impl ErrorHandler<RequestError> for ListenerErrorHandler {
 
 /// Spawns a background task that periodically verifies the log file size
 /// and truncates it if it exceeds the maximum allowable threshold (15 MB),
-/// guaranteeing that disk space cannot be exhausted under any circumstances.
+/// guaranteeing that disk space cannot be exhausted.
 pub fn spawn_log_size_guard() {
     tokio::spawn(async {
         let max_bytes: u64 = 15 * 1024 * 1024; // 15 MB
@@ -204,12 +188,8 @@ pub fn spawn_log_size_guard() {
                         .open(path)
                         .await
                     {
-                        Ok(_) => {
-                            log::info!("Log file '{}' safely truncated by background guard.", path);
-                        }
-                        Err(e) => {
-                            log::error!("Background log guard failed to truncate '{}': {}", path, e);
-                        }
+                        Ok(_) => log::info!("Log file '{}' safely truncated by background guard.", path),
+                        Err(e) => log::error!("Background log guard failed to truncate '{}': {}", path, e),
                     }
                 }
             }
@@ -220,7 +200,6 @@ pub fn spawn_log_size_guard() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_log_buffer_operations() {
@@ -237,16 +216,22 @@ mod tests {
 
         buffer.clear();
         assert_eq!(buffer.len(), 0);
-        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn partial_lines_are_held_until_newline() {
+        let mut buffer = LogBuffer::new(5);
+        write!(buffer, "partial").unwrap();
+        assert_eq!(buffer.len(), 0);
+        writeln!(buffer, " line").unwrap();
+        assert_eq!(buffer.get_last_lines(1), vec!["partial line"]);
     }
 
     #[test]
     fn test_listener_error_handler_notify_success() {
         let handler = ListenerErrorHandler::new();
         handler.failure_count.store(5, Ordering::Relaxed);
-        assert_eq!(handler.failure_count.load(Ordering::Relaxed), 5);
         handler.notify_success();
         assert_eq!(handler.failure_count.load(Ordering::Relaxed), 0);
     }
 }
-
